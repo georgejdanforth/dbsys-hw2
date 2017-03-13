@@ -183,7 +183,7 @@ class BufferPool:
         raise ValueError("Could not find a page to evict in the buffer pool")
 
   def clear(self):
-    for (pageId, (offset, page, _)) in self.pageMap.items():
+    for (pageId, (offset, page, _)) in list(self.pageMap.items()):
       if page.isDirty():
         self.flushPage(pageId)
 
