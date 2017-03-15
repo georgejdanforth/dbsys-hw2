@@ -34,19 +34,61 @@ class Union(Operator):
     # The iterator must be set up to deal with input iterators and handle both pipelined and
     # non-pipelined cases
     def __iter__(self):
-        raise NotImplementedError
+        self.initializeOutput()
+        self.inputIterators = [iter(self.lhsPlan), iter(self.rhsPlan)]
+        self.inputsFinished = [False, False]
+
+        if not self.pipelined:
+            self.outputIterator = self.processAllPages()
+
+        return self
 
     # Method used for iteration, doing work in the process. Handle pipelined and non-pipelined cases
     def __next__(self):
-        raise NotImplementedError
+        if self.pipelined:
+            while not (all(self.inputsFinished) or self.isOutputPageReady()):
+
+                # index of first unfinished input iterator
+                i = self.inputsFinished.index(False)
+
+                try:
+                    pageId, page = next(self.inputIterators[i])
+                    self.processInputPage(pageId, page)
+                except StopIteration:
+                    self.inputsFinished[i] = True
+
+            return self.outputPage()
+
+        else:
+            return next(self.outputIterator)
 
     # Page processing and control methods
 
     # Page-at-a-time operator processing
     # For union all, this copies over the input tuple to the output
     def processInputPage(self, pageId, page):
-        raise NotImplementedError
+        schema = self.schema()
+        if set(locals().keys()).isdisjoint(set(schema.fields)):
+            for inputTuple in page:
+                self.emitOutputTuple(inputTuple)
+        else:
+            # what does this even mean lmao
+            raise ValueError("Overlapping variables detected with operator schema")
 
     # Set-at-a-time operator processing
     def processAllPages(self):
-        raise NotImplementedError
+        if self.inputIterators is None:
+            self.inputIterators = [iter(self.lhsPlan), iter(self.rhsPlan)]
+
+        for inputIterator in self.inputIterators:
+            try:
+                for (pageId, page) in inputIterator:
+                    self.processInputPage(pageId, page)
+
+                    if self.outputPages:
+                        self.outputPages = [self.outputPages[-1]]
+
+            except StopIteration:
+                continue
+
+        return self.storage.pages(self.relationId())
