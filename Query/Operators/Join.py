@@ -158,10 +158,45 @@ class Join(Operator):
     # This method pins pages in the buffer pool during its access.
     # We track the page ids in the block to unpin them after processing the block.
     def accessPageBlock(self, bufPool, pageIterator):
-        raise NotImplementedError
+        blockIds = []
+        while bufPool.numFreePages() > 0:
+            try:
+                pId, page = next(pageIterator)
+                bufPool.getPage(pId, pinned=True)
+                blockIds.append(pId)
+            except StopIteration:
+                pageIterator = None
+        return (blockIds, pageIterator)
+
 
     def blockNestedLoops(self):
-        raise NotImplementedError
+        blockIds, pageIterator = self.accessPageBlock(self.storage.bufferPool,
+                                                      iter(self.lhsPlan))
+
+        while pageIterator is not None:
+            for lPageId in blockIds:
+                lPage = self.storage.bufferPool.getPage(lPageId)
+                for lTuple in lPage:
+                    joinExprEnv = self.loadSchema(self.lhsSchema, lTuple)
+
+                    for (rPageId, rhsPage) in iter(self.rhsPlan):
+                        for rtuple in rhsPage:
+                            joinExprEnv.update(self.loadSchema(self.rhsKeySchema, rtuple))
+
+                            if eval(self.joinExpr, globals(), joinExprEnv):
+                                outputTuple = self.joinSchema.instantiate(
+                                    *[joinExprEnv[f] for f in self.joinSchema.fields]
+                                )
+                                self.emitOutputTuple(self.joinSchema.pack(outputTuple))
+
+                    if self.outputPages:
+                        self.outputPages = [self.outputPages[-1]]
+
+            blockIds, pageIterator = self.accessPageBlock(self.storage.bufferPool,
+                                                          iter(self.lhsPlan))
+
+        return self.storage.pages(self.relationId())
+
 
     ##################################
     #
