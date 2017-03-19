@@ -72,7 +72,6 @@ class Union(Operator):
             for inputTuple in page:
                 self.emitOutputTuple(inputTuple)
         else:
-            # what does this even mean lmao
             raise ValueError("Overlapping variables detected with operator schema")
 
     # Set-at-a-time operator processing
