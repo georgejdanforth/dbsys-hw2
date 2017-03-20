@@ -1,3 +1,5 @@
+import itertools as it
+
 from Catalog.Schema import DBSchema
 from Query.Operator import Operator
 
@@ -60,10 +62,13 @@ class GroupBy(Operator):
 
     # Iterator abstraction for selection operator.
     def __iter__(self):
-        raise NotImplementedError
+        self.initializeOutput()
+        self.outputIterator = self.processAllPages()
+
+        return self
 
     def __next__(self):
-        raise NotImplementedError
+        return next(self.outputIterator)
 
     # Page-at-a-time operator processing
     def processInputPage(self, pageId, page):
@@ -71,7 +76,53 @@ class GroupBy(Operator):
 
     # Set-at-a-time operator processing
     def processAllPages(self):
-        raise NotImplementedError
+
+        relations = []
+
+        for (pageId, page) in iter(self.subPlan):
+            for tup in page:
+
+                unpackedTup = self.subSchema.unpack(tup)
+                groupByVal = tuple([self.groupExpr(unpackedTup)])
+                hashVal = str(self.groupHashFn(groupByVal))
+
+                if hashVal not in relations:
+                    self.storage.createRelation(hashVal, self.subSchema)
+                    relations.append(hashVal)
+
+                self.storage.insertTuple(hashVal, tup)
+
+        for rel in relations:
+            for (pageId, page) in self.storage.pages(rel):
+                groups = {}
+                for tup in page:
+
+                    unpackedTup = self.subSchema.unpack(tup)
+                    groupByVal = tuple([self.groupExpr(unpackedTup)])
+
+                    if groupByVal not in groups.keys():
+                        groups[groupByVal] = [aggExpr[0] for aggExpr in self.aggExprs]
+
+                    for i, aggExpr in enumerate(self.aggExprs):
+                        groups[groupByVal][i] = aggExpr[1](groups[groupByVal][i], unpackedTup)
+
+                for groupByVal in groups.keys():
+                    for i, aggExpr in enumerate(self.aggExprs):
+                        groups[groupByVal][i] = aggExpr[2](groups[groupByVal][i])
+
+                    outputTuple = self.outputSchema.instantiate(
+                        *it.chain(list(groupByVal), groups[groupByVal])
+                    )
+                    self.emitOutputTuple(self.outputSchema.pack(outputTuple))
+
+                if self.outputPages:
+                    self.outputPages = [self.outputPages[-1]]
+
+        for rel in relations:
+            self.storage.removeRelation(rel)
+
+        return self.storage.pages(self.relationId())
+
 
     # Plan and statistics information
 
