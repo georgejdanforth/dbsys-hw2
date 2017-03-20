@@ -169,14 +169,16 @@ class Join(Operator):
                 blockIds.append(pId)
             except StopIteration:
                 pageIterator = None
+                break
+
         return (blockIds, pageIterator)
 
 
     def blockNestedLoops(self):
-        blockIds, pageIterator = self.accessPageBlock(self.storage.bufferPool,
-                                                      iter(self.lhsPlan))
+        pageIterator = iter(self.lhsPlan)
 
         while pageIterator is not None:
+            blockIds, pageIterator = self.accessPageBlock(self.storage.bufferPool, pageIterator)
             for lPageId in blockIds:
                 lPage = self.storage.bufferPool.getPage(lPageId)
                 for lTuple in lPage:
@@ -184,7 +186,7 @@ class Join(Operator):
 
                     for (rPageId, rhsPage) in iter(self.rhsPlan):
                         for rtuple in rhsPage:
-                            joinExprEnv.update(self.loadSchema(self.rhsKeySchema, rtuple))
+                            joinExprEnv.update(self.loadSchema(self.rhsSchema, rtuple))
 
                             if eval(self.joinExpr, globals(), joinExprEnv):
                                 outputTuple = self.joinSchema.instantiate(
@@ -194,6 +196,8 @@ class Join(Operator):
 
                     if self.outputPages:
                         self.outputPages = [self.outputPages[-1]]
+
+                self.storage.bufferPool.unpinPage(lPageId)
 
             blockIds, pageIterator = self.accessPageBlock(self.storage.bufferPool,
                                                           iter(self.lhsPlan))
