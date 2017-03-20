@@ -218,7 +218,25 @@ class Join(Operator):
     # Hash join implementation.
     #
     def hashJoin(self):
-        raise NotImplementedError
+        lRelations = self.hashPartition(self.lhsPlan, self.lhsHashFn, self.lhsSchema)
+        rRelations = self.hashPartition(self.rhsPlan, self.rhsHashFn, self.rhsSchema)
+
+
+    def hashPartition(self, plan, hashFn, schema):
+        relations = []
+        for (pagId, page) in iter(plan):
+            for tup in page:
+
+                hashVal = str(eval(hashFn, globals(), self.loadSchema(schema, tup)))
+
+                if hashVal not in relations:
+                    self.storage.createRelation(hashVal, schema)
+                    relations.append(hashVal)
+
+                self.storage.insertTuple(hashVal, tup)
+
+        return relations
+
 
     # Plan and statistics information
 
